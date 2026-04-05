@@ -174,4 +174,29 @@ The ipa-server-install command was successful
 
 После успешной установки FreeIPA, проверим, что сервер Kerberos может выдать нам билет: 
 
+```
+[root@ipa ~]# kinit admin
+Password for admin@OTUS.LAN:  #Указываем Directory Manager password
+[root@ipa ~]# klist           #Запросим список билетов Kerberos
+Ticket cache: KCM:0
+Default principal: admin@OTUS.LAN
+```
+```
+kinit admin
+klist
+```
+<img width="1037" height="211" alt="image" src="https://github.com/user-attachments/assets/07485313-baf0-4a8c-8cdd-5b8f5537ebc1" />
+
+Для удаление полученного билета воспользуемся командой: kdestroy
+
+Мы можем зайти в Web-интерфейс нашего FreeIPA-сервера, для этого на нашей хостой машине нужно прописать следующую строку в файле Hosts:
+192.168.57.10 ipa.otus.lan
+
+Откроется окно управления FreeIPA-сервером. В имени пользователя укажем admin, в пароле укажем наш IPA admin password и нажмём войти. 
+
+
+<img width="2558" height="514" alt="image" src="https://github.com/user-attachments/assets/ac265b89-f3ae-4e7d-8e8c-fd93b9008099" />
+
+
+На этом установка и настройка FreeIPA-сервера завершена.
 
