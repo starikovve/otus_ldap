@@ -192,6 +192,9 @@ klist
 Мы можем зайти в Web-интерфейс нашего FreeIPA-сервера, для этого на нашей хостой машине нужно прописать следующую строку в файле Hosts:
 192.168.57.10 ipa.otus.lan
 
+<img width="759" height="146" alt="image" src="https://github.com/user-attachments/assets/80caee73-462b-4ef2-8665-03480cd8228c" />
+
+
 Откроется окно управления FreeIPA-сервером. В имени пользователя укажем admin, в пароле укажем наш IPA admin password и нажмём войти. 
 
 
@@ -200,3 +203,143 @@ klist
 
 На этом установка и настройка FreeIPA-сервера завершена.
 
+# Ansible playbook для конфигурации клиента
+
+
+Настройка клиента похожа на настройку сервера. На хосте также нужно:
+- Настроить синхронизацию времени и часовой пояс
+- Настроить (или отключить) firewall
+- Настроить (или отключить) SElinux
+  
+В файле hosts должна быть указана запись с FreeIPA-сервером и хостом
+
+Хостов, которые требуется добавить к серверу может быть много, для упрощения нашей работы выполним настройки с помощью Ansible:
+
+В каталоге с нашей лабораторной работой создадим каталог Ansible: mkdir ansible
+В каталоге ansible создадим файл hosts со следующими параметрами:
+
+```
+[clients]
+client1.otus.lan ansible_host=192.168.57.11 ansible_user=vagrant ansible_ssh_private_key_file=/home/vlad/.ssh/ldap/client11/private_key
+client2.otus.lan ansible_host=192.168.57.12 ansible_user=vagrant ansible_ssh_private_key_file=/home/vlad/.ssh/ldap/client12/private_key
+```
+Файл содержит группу clients в которой прописаны 2 хоста: 
+client1.otus.lan
+client2.otus.lan
+Также указаны и ip-адреса, имя пользователя от которого будет логин и ssh-ключ.
+
+Далее создадим файл provision.yml в котором непосредственно будет выполняться настройка клиентов: 
+
+```
+- name: Base set up
+  hosts: clients
+  #Выполнять действия от root-пользователя
+  become: yes
+  tasks:
+  #Установка текстового редактора Vim и chrony
+  - name: install softs on CentOS
+    yum:
+      name:
+        - vim
+        - chrony
+      state: present
+      update_cache: true
+  
+  #Отключение firewalld и удаление его из автозагрузки
+  - name: disable firewalld
+    service:
+      name: firewalld
+      state: stopped
+      enabled: false
+  
+  #Отключение SElinux из автозагрузки
+  #Будет применено после перезагрузки
+  - name: disable SElinux
+    selinux:
+      state: disabled
+  
+  #Отключение SElinux до перезагрузки
+  - name: disable SElinux now
+    shell: setenforce 0
+
+  #Установка временной зоны Европа/Москва    
+  - name: Set up timezone
+    timezone:
+      name: "Europe/Moscow"
+  
+  #Запуск службы Chrony, добавление её в автозагрузку
+  - name: enable chrony
+    service:
+      name: chronyd
+      state: restarted
+      enabled: true
+  
+  #Копирование файла /etc/hosts c правами root:root 0644
+  - name: change /etc/hosts
+    template:
+      src: hosts.j2
+      dest: /etc/hosts
+      owner: root
+      group: root
+      mode: 0644
+  
+  #Установка клиента Freeipa
+  - name: install module ipa-client
+    yum:
+      name:
+        - freeipa-client
+      state: present
+      update_cache: true
+  
+  #Запуск скрипта добавления
+ хоста к серверу
+  - name: add host to ipa-server
+    shell: echo -e "yes\nyes" | ipa-client-install --mkhomedir --domain=OTUS.LAN --server=ipa.otus.lan --no-ntp -p admin -w 1Q2w3e4r5
+```
+
+<img width="1502" height="188" alt="image" src="https://github.com/user-attachments/assets/745ef1f8-3d73-402b-8071-c650f3e24b48" />
+
+Почти все модули нам уже знакомы, давайте подробнее остановимся на последней команде echo -e "yes\nyes" | ipa-client-install --mkhomedir --domain=OTUS.LAN --server=ipa.otus.lan --no-ntp -p admin -w 1Q2w3e4r5
+
+
+При добавлении хоста к домену мы можем просто ввести команду ipa-client-install и следовать мастеру подключения к FreeIPA-серверу (как было в первом пункте).
+
+```
+Однако команда позволяет нам сразу задать требуемые нам параметры:
+--domain — имя домена
+--server — имя FreeIPA-сервера
+--no-ntp — не настраивать дополнительно ntp (мы уже настроили chrony)
+-p — имя админа домена
+-w — пароль администратора домена (IPA password)
+--mkhomedir — создать директории пользователей при их первом логине
+```
+
+Если мы сразу укажем все параметры, то можем добавить эту команду в Ansible и автоматизировать процесс добавления хостов в домен. 
+
+Альтернативным вариантом мы можем найти на GitHub отдельные модули по подключениею хостов к FreeIPA-сервер. 
+
+После подключения хостов к FreeIPA-сервер нужно проверить, что мы можем получить билет от Kerberos сервера: kinit admin
+Если подключение выполнено правильно, то мы сможем получить билет, после ввода пароля. 
+
+<img width="805" height="202" alt="image" src="https://github.com/user-attachments/assets/55d3217c-6924-459f-9aeb-38a3baf17e51" />
+
+
+Давайте проверим работу LDAP, для этого на сервере FreeIPA создадим пользователя и попробуем залогиниться к клиенту:
+
+- Авторизируемся на сервере: kinit admin
+- Создадим пользователя otus-user
+  ```
+  ipa user-add otus-user --first=Otus --last=User --password
+  ```
+<img width="851" height="470" alt="image" src="https://github.com/user-attachments/assets/2697fc76-21a5-42b7-a518-b35f2ff76ba5" />
+
+На хосте client1 или client2 выполним команду kinit otus-user
+
+<img width="1010" height="117" alt="image" src="https://github.com/user-attachments/assets/98c2f8cb-41a4-498c-b97d-bc2d70e7a9ea" />
+
+<img width="661" height="140" alt="image" src="https://github.com/user-attachments/assets/f20a3d0a-34de-4911-bbc4-45065f91fa2d" />
+
+
+Система запросит у нас пароль и попросит ввести новый пароль. 
+
+На этом процесс добавления хостов к FreeIPA-серверу завершен.
